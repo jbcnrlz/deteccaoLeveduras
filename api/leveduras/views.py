@@ -499,9 +499,14 @@ def estatisticas_caracteristicas(request, imagem_id):
     """
     try:
         leveduras = LeveduraSegmentada.objects.filter(imagem_original_id=imagem_id)
+
+
+        primeira_levedura = leveduras.first()
+
         
         estatisticas = {
             'total_leveduras': leveduras.count(),
+            'nome_analise': primeira_levedura.analise.nome_amostra if primeira_levedura else None,
             'area_microns': {
                 'media': leveduras.aggregate(Avg('area_microns'))['area_microns__avg'],
                 'desvio_padrao': leveduras.aggregate(StdDev('area_microns'))['area_microns__stddev'],
