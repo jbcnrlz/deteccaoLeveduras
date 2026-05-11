@@ -48,10 +48,29 @@ class ImagemMicroscopica(models.Model):
         return f"Microscópica - {self.analise.nome_amostra}"
 
 class ImagemColonia(models.Model):
+    STATUS_CHOICES = [
+        ('pendente', 'Pendente'),
+        ('processando', 'Processando'),
+        ('concluido', 'Concluído'),
+        ('erro', 'Erro'),
+    ]
     analise = models.ForeignKey(AnaliseLevedura, on_delete=models.CASCADE, related_name='imagens_colonias')
     imagem = models.ImageField(upload_to='leveduras/colonias/%Y/%m/%d/')
     metadata = models.JSONField(null=True, blank=True)
     criado_em = models.DateTimeField(default=timezone.now)
+    
+    # Novos campos para processamento
+    status_processamento = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pendente'
+    )
+    progresso = models.IntegerField(default=0)  # 0-100%
+    erro_processamento = models.TextField(blank=True, null=True)
+    task_id = models.CharField(max_length=255, blank=True, null=True)
+    iniciado_em = models.DateTimeField(null=True, blank=True)
+    concluido_em = models.DateTimeField(null=True, blank=True)
+    resultado_colonias = models.JSONField(null=True, blank=True)  # Lista de características
 
     def __str__(self):
         return f"Colônia - {self.analise.nome_amostra}"

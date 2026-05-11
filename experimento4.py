@@ -125,4 +125,4 @@ def analisar_morfologia_com_cellpose(caminho_imagem):
 
 # --- Execução do Código ---
 # Certifique-se de que 'colonia.jpeg' está na mesma pasta.
-caracteristicas_cellpose = analisar_morfologia_com_cellpose('colonia_crop.jpeg')
+caracteristicas_cellpose = analisar_morfologia_com_cellpose('colonia2.jpg')

@@ -10,8 +10,12 @@ class ImagemMicroscopicaSerializer(serializers.ModelSerializer):
 class ImagemColoniaSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImagemColonia
-        fields = ['id', 'imagem', 'criado_em', 'metadata']
-        read_only_fields = ['id', 'criado_em']
+        fields = ['id', 'imagem', 'criado_em', 'metadata', 
+                  'status_processamento', 'progresso', 'erro_processamento',
+                  'iniciado_em', 'concluido_em', 'resultado_colonias']
+        read_only_fields = ['id', 'criado_em', 'status_processamento', 
+                            'progresso', 'erro_processamento', 
+                            'iniciado_em', 'concluido_em', 'resultado_colonias']
 
 class AnaliseLeveduraSerializer(serializers.ModelSerializer):
     imagens_microscopicas = ImagemMicroscopicaSerializer(many=True, read_only=True)

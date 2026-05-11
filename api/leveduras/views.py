@@ -356,21 +356,15 @@ def salvar_levedura_segmentada(imagem_array, levedura_id, analise, imagem_micro,
 @api_view(['POST'])
 def upload_imagem_colonia(request, analise_id):
     analise = get_object_or_404(AnaliseLevedura, id=analise_id)
-    
+
     if 'imagem' not in request.FILES:
-        return Response(
-            {'erro': 'Nenhuma imagem fornecida'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
+        return Response({'erro': 'Nenhuma imagem fornecida'}, status=status.HTTP_400_BAD_REQUEST)
+
     imagem = request.FILES['imagem']
-    
     if not imagem.content_type.startswith('image/'):
-        return Response(
-            {'erro': 'Arquivo não é uma imagem válida'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
+        return Response({'erro': 'Arquivo não é uma imagem válida'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Cria o registro (já com os novos campos)
     imagem_colonia = ImagemColonia.objects.create(
         analise=analise,
         imagem=imagem,
@@ -378,15 +372,29 @@ def upload_imagem_colonia(request, analise_id):
             'nome_arquivo': imagem.name,
             'tamanho': imagem.size,
             'tipo_conteudo': imagem.content_type,
-        }
+        },
+        status_processamento='pendente'
     )
-    
+    # Força a escrita do arquivo
+    imagem_colonia.save()
+
+    # Inicia thread de processamento
+    import threading
+    thread = threading.Thread(
+        target=processar_colonia_background,
+        args=(str(imagem_colonia.id),)
+    )
+    thread.daemon = True
+    thread.start()
+
     return Response({
         'id': str(imagem_colonia.id),
-        'mensagem': 'Imagem de colônia salva com sucesso',
+        'mensagem': 'Imagem de colônia recebida e em processamento',
         'analise_id': str(analise_id),
-        'url_imagem': imagem_colonia.imagem.url
-    }, status=status.HTTP_201_CREATED)
+        'status': 'pendente',
+        'url_imagem': imagem_colonia.imagem.url,
+        'endpoint_status': f'/api/analises/colonia/{imagem_colonia.id}/status/'
+    }, status=status.HTTP_202_ACCEPTED)
 
 
 def extrair_caracteristicas_levedura(imagem_array, microns_por_pixel=MICRONS_PER_PIXEL):
@@ -520,3 +528,135 @@ def estatisticas_caracteristicas(request, imagem_id):
         
     except Exception as e:
         return Response({'erro': str(e)}, status=400)
+    
+def processar_colonia_com_cellpose(caminho_imagem):
+    """
+    Segmenta colônias usando Cellpose e retorna lista de características.
+    """
+    from cellpose import models, io
+    import cv2
+    import numpy as np
+    import math
+
+    # Carrega imagem com Cellpose (que lida com vários formatos)
+    img = io.imread(caminho_imagem)
+
+    # Modelo Cellpose (cyto para objetos celulares)
+    model = models.CellposeModel(gpu=True, model_type='cyto')
+
+    # Segmentação
+    masks, flows, styles = model.eval(
+        img,
+        diameter=None,
+        channels=[0, 0],
+        flow_threshold=0.8,
+        cellprob_threshold=0.0
+    )
+
+    resultados = []
+    colony_ids = np.unique(masks)
+    MIN_AREA_THRESHOLD = 100  # pixels
+
+    for idx, obj_id in enumerate(colony_ids):
+        if obj_id == 0:
+            continue
+
+        # Máscara binária
+        colony_mask = (masks == obj_id).astype(np.uint8) * 255
+        contornos, _ = cv2.findContours(colony_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contornos:
+            continue
+
+        contorno = contornos[0]
+        area = cv2.contourArea(contorno)
+        if area < MIN_AREA_THRESHOLD:
+            continue
+
+        perimetro = cv2.arcLength(contorno, True)
+        circularidade = (4 * math.pi * area) / (perimetro * perimetro) if perimetro > 0 else 0
+
+        # Fator de rugosidade
+        casco_convexo = cv2.convexHull(contorno)
+        area_casco = cv2.contourArea(casco_convexo)
+        fator_rugosidade = area / area_casco if area_casco > 0 else 0
+
+        # Proporção de aspecto
+        x, y, w, h = cv2.boundingRect(contorno)
+        proporcao_aspecto = w / h if h > 0 else 0
+
+        resultados.append({
+            'ID': idx,
+            'Area_pixels': round(area, 2),
+            'Perimetro_pixels': round(perimetro, 2),
+            'Circularidade': round(circularidade, 3),
+            'Fator_Rugosidade': round(fator_rugosidade, 3),
+            'Proporcao_Aspecto': round(proporcao_aspecto, 3),
+            'BoundingBox': {'x': x, 'y': y, 'width': w, 'height': h}
+        })
+
+    return resultados
+
+def processar_colonia_background(imagem_colonia_id):
+    """
+    Processa a imagem de colônia em background.
+    """
+    try:
+        from django.utils import timezone
+        from .models import ImagemColonia
+
+        imagem_colonia = ImagemColonia.objects.get(id=imagem_colonia_id)
+        imagem_colonia.status_processamento = 'processando'
+        imagem_colonia.iniciado_em = timezone.now()
+        imagem_colonia.progresso = 10
+        imagem_colonia.save()
+
+        # Pequena pausa para garantir que o arquivo foi salvo
+        import time
+        time.sleep(2)
+
+        if not imagem_colonia.imagem or not hasattr(imagem_colonia.imagem, 'path'):
+            raise ValueError("Arquivo de imagem não disponível")
+
+        # Processa a segmentação
+        resultados = processar_colonia_com_cellpose(imagem_colonia.imagem.path)
+
+        # Atualiza objeto com os resultados
+        imagem_colonia.resultado_colonias = resultados
+        imagem_colonia.status_processamento = 'concluido'
+        imagem_colonia.progresso = 100
+        imagem_colonia.concluido_em = timezone.now()
+        imagem_colonia.save()
+
+        print(f"Processamento de colônia concluído: {imagem_colonia_id}")
+
+    except Exception as e:
+        imagem_colonia = ImagemColonia.objects.get(id=imagem_colonia_id)
+        imagem_colonia.status_processamento = 'erro'
+        imagem_colonia.erro_processamento = str(e)
+        imagem_colonia.save()
+        print(f"Erro no processamento da colônia: {str(e)}")
+        raise e
+    
+@api_view(['GET'])
+def status_processamento_colonia(request, colonia_id):
+    """Retorna o status do processamento da imagem de colônia e resultados quando disponíveis."""
+    imagem_colonia = get_object_or_404(ImagemColonia, id=colonia_id)
+
+    response_data = {
+        'id': str(imagem_colonia.id),
+        'status': imagem_colonia.status_processamento,
+        'progresso': imagem_colonia.progresso,
+        'criado_em': imagem_colonia.criado_em,
+        'iniciado_em': imagem_colonia.iniciado_em,
+        'concluido_em': imagem_colonia.concluido_em,
+    }
+
+    if imagem_colonia.status_processamento == 'concluido':
+        response_data['resultado'] = {
+            'total_colonias': len(imagem_colonia.resultado_colonias) if imagem_colonia.resultado_colonias else 0,
+            'colonias': imagem_colonia.resultado_colonias
+        }
+    elif imagem_colonia.status_processamento == 'erro':
+        response_data['erro'] = imagem_colonia.erro_processamento
+
+    return Response(response_data)

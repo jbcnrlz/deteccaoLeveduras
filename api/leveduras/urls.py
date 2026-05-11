@@ -10,4 +10,5 @@ urlpatterns = [
     path('analises/<uuid:analise_id>/colonia/', views.upload_imagem_colonia, name='upload_colonia'),
     path('analises/<int:imagem_id>/status/', views.status_processamento, name='status-processamento'),
     path('analises/<int:imagem_id>/levedura_segmentada/', views.estatisticas_caracteristicas, name='leveduras-processamento'),
+    path('analises/<int:colonia_id>/colonia/status/', views.status_processamento_colonia, name='status_colonia'),
 ]

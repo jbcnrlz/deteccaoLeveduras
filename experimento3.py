@@ -147,7 +147,7 @@ def analisar_e_visualizar_levedura(caminho_imagem, microns_por_pixel):
 
 # --- EXECUÇÃO ---
 if __name__ == '__main__':
-    caminho_imagem_levedura = 'leveduras_segmentadas\levedura_0043.png'
+    caminho_imagem_levedura = 'leveduras_segmentadas/levedura_0043.png'
     
     # IMPORTANTE: Use o fator de calibração correto da sua configuração!
     fator_calibracao_microns_por_pixel = 0.035 
